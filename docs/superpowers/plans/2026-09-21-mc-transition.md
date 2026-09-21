@@ -475,9 +475,12 @@ static int test_2d_per_axis_jump(void) {
     TEST("2D jump_to uses each axis current as its own start");
     mc_transition2d_t tr;
     mc_transition2d_init(&tr);
-    mc_transition2d_jump_to(&tr, 5, 7);
-    CHECK(tr.x.start_value == 5 && tr.y.start_value == 7);
+    mc_transition2d_jump_to(&tr, 5, 7);          /* current 0,0 → start 0,0 */
+    CHECK(mc_transition2d_x(&tr) == 5 && mc_transition2d_y(&tr) == 7);
     CHECK(mc_transition2d_end_x(&tr) == 5 && mc_transition2d_end_y(&tr) == 7);
+    mc_transition2d_jump_to(&tr, 9, 11);         /* current 5,7 → start 5,7 */
+    CHECK(tr.x.start_value == 5 && tr.y.start_value == 7);
+    CHECK(mc_transition2d_x(&tr) == 9 && mc_transition2d_y(&tr) == 11);
     PASS(); return 0;
 }
 ```
