@@ -224,3 +224,61 @@ bool mc_transition3d_is_finish(const mc_transition3d_t *t)
 {
     return t->x.is_finish && t->y.is_finish && t->z.is_finish;
 }
+
+// ---------------------------------------------------------------------------
+// Smooth color transition — three 1D channels, one clock (contract #9).
+// ---------------------------------------------------------------------------
+
+void mc_color_trans_init(mc_color_trans_t *ct)
+{
+    mc_transition_init(&ct->r);
+    mc_transition_init(&ct->g);
+    mc_transition_init(&ct->b);
+    ct->is_changed = false;
+}
+
+void mc_color_trans_set_duration(mc_color_trans_t *ct, uint32_t ms)
+{
+    ct->r.duration = ct->g.duration = ct->b.duration = ms;
+}
+
+void mc_color_trans_jump_to(mc_color_trans_t *ct, uint32_t rgb888)
+{
+    mc_transition_jump(&ct->r, (rgb888 >> 16) & 0xFF, (rgb888 >> 16) & 0xFF);
+    mc_transition_jump(&ct->g, (rgb888 >> 8) & 0xFF, (rgb888 >> 8) & 0xFF);
+    mc_transition_jump(&ct->b, rgb888 & 0xFF, rgb888 & 0xFF);
+}
+
+void mc_color_trans_move_to(mc_color_trans_t *ct, uint32_t rgb888)
+{
+    if (rgb888 == mc_color_trans_value(ct)) return;
+    mc_transition_jump(&ct->r, ct->r.current_value, (rgb888 >> 16) & 0xFF);
+    mc_transition_jump(&ct->g, ct->g.current_value, (rgb888 >> 8) & 0xFF);
+    mc_transition_jump(&ct->b, ct->b.current_value, rgb888 & 0xFF);
+    mc_transition_reset(&ct->r);
+    mc_transition_reset(&ct->g);
+    mc_transition_reset(&ct->b);
+    ct->is_changed = true;
+}
+
+uint32_t mc_color_trans_value(const mc_color_trans_t *ct)
+{
+    return ((uint32_t)ct->r.current_value << 16) |
+           ((uint32_t)ct->g.current_value << 8) | (uint32_t)ct->b.current_value;
+}
+
+void mc_color_trans_update(mc_color_trans_t *ct, uint32_t now_ms)
+{
+    if (ct->is_changed) {
+        ct->is_changed = false;
+        ct->r.time_offset = now_ms;
+        ct->g.time_offset = now_ms;
+        ct->b.time_offset = now_ms;
+        ct->r.is_paused = false;
+        ct->g.is_paused = false;
+        ct->b.is_paused = false;
+    }
+    mc_transition_update(&ct->r, now_ms);
+    mc_transition_update(&ct->g, now_ms);
+    mc_transition_update(&ct->b, now_ms);
+}

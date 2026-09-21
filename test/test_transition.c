@@ -290,6 +290,35 @@ static int test_3d_completion_at_exact_boundary(void) {
     PASS(); return 0;
 }
 
+static int test_color_jump_move_value(void) {
+    TEST("color jump_to/move_to/value with VAMeter palette timing");
+    mc_color_trans_t ct;
+    mc_color_trans_init(&ct);
+    mc_color_trans_set_duration(&ct, 350);
+    mc_color_trans_jump_to(&ct, 0xCBDEEE);
+    CHECK(mc_color_trans_value(&ct) == 0xCBDEEE);
+    mc_color_trans_move_to(&ct, 0x536484);       /* deferred start */
+    mc_color_trans_update(&ct, 100);             /* anchor */
+    mc_color_trans_update(&ct, 100 + 175);       /* midpoint: per-channel check */
+    CHECK(mc_color_trans_value(&ct) != 0x536484);
+    mc_color_trans_update(&ct, 100 + 351);       /* strict > (2D rules) */
+    CHECK(mc_color_trans_value(&ct) == 0x536484);
+    PASS(); return 0;
+}
+
+static int test_color_same_value_noop(void) {
+    TEST("color move_to same value is a no-op");
+    mc_color_trans_t ct;
+    mc_color_trans_init(&ct);
+    mc_color_trans_set_duration(&ct, 100);
+    mc_color_trans_jump_to(&ct, 0x112233);
+    mc_color_trans_move_to(&ct, 0x112233);       /* value() == target: no re-anchor */
+    mc_color_trans_update(&ct, 1000);
+    mc_color_trans_update(&ct, 2000);
+    CHECK(mc_color_trans_value(&ct) == 0x112233);
+    PASS(); return 0;
+}
+
 int main(void) {
     printf("test_transition:\n");
     if (test_1d_init_defaults()) return 1;
@@ -309,6 +338,8 @@ int main(void) {
     if (test_2d_per_axis_jump()) return 1;
     if (test_3d_per_axis_delay_zero_anchor()) return 1;
     if (test_3d_completion_at_exact_boundary()) return 1;
+    if (test_color_jump_move_value()) return 1;
+    if (test_color_same_value_noop()) return 1;
     printf("%d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
