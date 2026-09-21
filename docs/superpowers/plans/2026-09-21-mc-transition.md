@@ -1017,6 +1017,14 @@ Record the new eui commit SHA — Task 7 pins it.
 
 Include lines: `#include "eui_transition2d.h"` and `#include "eui_transition3d.h"` → `#include "mc_transition.h"` (files including both need the include once — de-dup if sed produces two identical lines).
 
+> **勘误（Task 7 实作补充，2026-09-21）**：上表在执行时有五处未覆盖，实施时已按下述方式补齐（均为机械改名，未改语义）。nfc-kit 后续迁移请一并套用：
+>
+> 1. **brief 的 shell 循环在 zsh 下不工作**：zsh 不对未加引号的 `$FILES` 做分词，`FILES=$(grep -rl …); for f in $FILES` 只会把整串当作单个词迭代一次、什么也不改。改用 `xargs`（`grep -rl … | xargs sed -i '' …`）或等价写法。
+> 2. **include 行带 `ui/` 前缀**：本代码库所有 include 写作 `#include "ui/eui_transition2d.h"` / `"ui/eui_transition3d.h"`，表中两条裸路径模式匹配不到，须带上 `ui/` 前缀。
+> 3. **`eui_easing_fn_t` 未列入表内**：该 typedef 仅定义于被删除的 `ui/eui_transition2d.h`，而规则 8 只改 `eui_transition_`，故它幸存到改名之后并破坏构建；须改为 `mc_easing_fn_t`，使用点是 `apps/eui_selector.{c,h}`。
+> 4. **`test_selector` 还有第三处对已删源文件的 CMake 引用**：除表中提到的 2 个测试目标外，`test_selector` 的 `add_executable` 源列表里也列有 `ui/eui_transition2d.c`，须一并删除，否则 CMake 报 `Cannot find source file`。
+> 5. **`test/smoke_menu.c` 需显式补 `#include "ui/ui_draw.h"`**：该文件原本没有任何 transition include，`ui_rgb888_to_565` 是经 `apps/menu_view.h → ui/eui_selector.h → ui/eui_transition2d.h` 传递而来的；这条传递路径现为 `mc_transition.h`，不再声明该函数。
+
 - [ ] **Step 1: Bump the eui submodule**
 
 ```bash
