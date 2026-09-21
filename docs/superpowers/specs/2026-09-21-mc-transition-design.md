@@ -1,147 +1,88 @@
-# mc_transition — Smooth UI Toolkit Transition Semantics for MotionC
+# mc_transition — MotionC 的 Smooth UI Toolkit Transition 语义模块
 
-## Motivation
+## 动机
 
-MotionC's animation engine (`mc_animate`) is **dt-driven and push-style**: the caller
-supplies a frame delta each update, and results are delivered through `on_update`
-callbacks. That model fits tween sequences and spring simulations well, but it does
-not match how immediate-mode embedded UIs animate. Two real consumers
-(VAMeter-Firmware `app-eui`, nfc-kit `fw/app-eui`) independently needed the
-**Transition semantics of the original smooth_ui_toolkit** (`Transition`,
-`Transition2D`, `Transition3D`, `SmoothRGB`) and each had to hand-port them
-project-side (`eui_transition2d.c` / `eui_transition3d.c`), because the semantics
-differ from `mc_animate` in ways that are not shimmable:
+MotionC 现有动画引擎（`mc_animate`）是 **dt 驱动、push 式**的：调用方每次 update 传入帧增量，结果通过 `on_update` 回调推送。这个模型适合补间序列和弹簧模拟，但与立即式嵌入式 UI 的动画方式不匹配。两个真实消费者（VAMeter-Firmware 的 `app-eui`、nfc-kit 的 `fw/app-eui`）各自都需要原版 smooth_ui_toolkit 的 **Transition 语义**（`Transition`、`Transition2D`、`Transition3D`、`SmoothRGB`），并且都不得不在项目侧手工移植（`eui_transition2d.c` / `eui_transition3d.c`），因为其语义与 `mc_animate` 的差异不是一层 shim 能弥合的：
 
-| Semantic | mc_animate (dt/push) | smooth_ui Transition (now_ms/pull) |
-|----------|----------------------|-------------------------------------|
-| Clock | Caller accumulates `dt`; delay is **destructive** (`delay -= dt`, consumed once) | Anchor `time_offset` at start; `delay` is a **persistent config** reused by every `move_to` |
-| Start moment | Next `update(dt)` after retarget | Deferred: `move_to` only sets endpoints + `is_changed`; the clock starts at the **next `update(now)`**, anchoring `time_offset = now` |
-| Result delivery | Push via `on_update(ctx, value)` | Pull: view reads `x() / y()` during draw |
-| 2D granularity | Whole-struct ops on `mc_vec2_t` | Per-axis: independent `jump`, per-axis readers, per-axis `end_x` |
-| Completion | `update()` return value (must poll by calling) | Queryable state: `is_finish` (plus `is_paused`) readable at any time |
-| Retarget guard | `move_to` always restarts | `move_to` to the current target is a **no-op** (does not reset a running clock) |
+| 语义 | mc_animate（dt/push） | smooth_ui Transition（now_ms/pull） |
+|------|----------------------|-------------------------------------|
+| 时钟 | 调用方累计 `dt`；delay 是**破坏性的**（`delay -= dt`，消费一次即失效） | 起表时锚定 `time_offset`；`delay` 是**持久配置**，每次 `move_to` 都复用 |
+| 起表时刻 | retarget 后的下一次 `update(dt)` | 延迟启动：`move_to` 只设端点 + `is_changed`；时钟在下一次 `update(now)` 才起表，锚定 `time_offset = now` |
+| 结果交付 | 通过 `on_update(ctx, value)` 推送 | 拉取：视图在绘制时读 `x() / y()` |
+| 2D 粒度 | `mc_vec2_t` 整结构操作 | 按轴：单轴独立 `jump`、按轴读取、按轴 `end_x` |
+| 完成判定 | `update()` 返回值（必须调 update 才能轮询到） | 可查询状态：`is_finish`（以及 `is_paused`），任何时刻可读 |
+| 改目标守卫 | `move_to` 总是重新起表 | `move_to` 到当前目标时是**空操作**（不打断进行中的时钟） |
 
-The eui simulator project validated the port against the original C++ toolkit with
-per-constant animation alignment (its regression tests pin easing values, delays,
-and `is_changed` timing). That port is the provenance of this design: promote the
-**semantics** into MotionC as a first-class module, implemented on MotionC's own
-numeric base.
+eui 模拟器项目已经用逐常数动画对齐验证过这套移植（其回归测试钉住了缓动值、delay 和 `is_changed` 时序）。该移植就是本设计 provenance：把**语义**提升为 MotionC 的一等模块，实现在 MotionC 自己的数值底座上。
 
-## Goals
+## 目标
 
-1. A new `mc_transition` module implementing the smooth_ui_toolkit Transition
-   semantics: 1D, 2D, 3D, and smooth color transition.
-2. Full reuse of existing MotionC facilities — `mc_real_t`, `mc_easing_fn_t`,
-   `mc_easing_*` functions. No new easing code, no new math.
-3. Port the field-proven regression tests (VAMeter `test_transition2d/3d`) so the
-   animation-alignment guarantees survive the migration.
-4. Enable consumers (eui-based projects) to delete their private transition ports
-   and depend on MotionC directly.
+1. 新增 `mc_transition` 模块，实现 smooth_ui_toolkit 的 Transition 语义：1D、2D、3D 以及平滑颜色过渡。
+2. 完全复用 MotionC 现有设施——`mc_real_t`、`mc_easing_fn_t`、`mc_easing_*` 函数。不新增缓动代码，不新增数学代码。
+3. 移植经过实战验证的回归测试（VAMeter 的 `test_transition2d/3d`），让动画对齐保证在迁移中存活。
+4. 让消费者（基于 eui 的项目）能够删除各自的私有 transition 移植，直接依赖 MotionC。
 
-## Non-Goals
+## 非目标
 
-- No changes to `mc_animate` / `mc_spring` / `mc_sequence` — they keep serving
-  dt/push use cases unchanged. The two models coexist (see "Relation to existing
-  modules").
-- No central animation scheduler, ticker, or frame manager. Transitions are
-  advanced explicitly by the caller (`update(now_ms)`), typically from a draw
-  handler.
-- No display-format knowledge (RGB565 conversion stays in the UI framework layer).
-- No relocation of higher-level widgets (e.g. the animated selector) into MotionC.
-- No float-path-specific work beyond what `MC_USE_FLOAT` already provides.
+- 不改动 `mc_animate` / `mc_spring` / `mc_sequence`——它们继续原样服务 dt/push 场景。两种模型并存（见"与现有模块的关系"）。
+- 不做中央动画调度器、ticker 或帧管理器。过渡由调用方显式推进（`update(now_ms)`），通常在绘制 handler 里。
+- 不引入显示格式知识（RGB565 转换留在 UI 框架层）。
+- 不把更高层的 widget（如动画选择器）搬进 MotionC。
+- 除 `MC_USE_FLOAT` 已提供的之外，不做 float 路径的专项工作。
 
-## Relation to Existing Modules
+## 与现有模块的关系
 
 ```
-mc_easing (reused as-is)      mc_color (reused as-is for RGB888 helpers)
+mc_easing（原样复用）          mc_color（RGB888 辅助函数原样复用）
         \                            /
-         mc_transition  (NEW — now_ms/pull semantics layer)
+         mc_transition （新增 — now_ms/pull 语义层）
                          |            \
-   mc_animate (unchanged dt/push)    (future consumers: eui widgets)
+   mc_animate（不变，dt/push）      （未来消费者：eui widgets）
 ```
 
-`mc_transition` is a **sibling** of `mc_animate`, not a replacement and not built
-on top of it: the destructive-delay and push-callback model of `mc_animate`
-cannot express the anchored-clock semantics above. Both modules share
-`mc_easing`/`mc_real_t`. Documented division of labor:
+`mc_transition` 是 `mc_animate` 的**兄弟**，不是替代、也不架在它之上：`mc_animate` 的破坏性 delay 和 push 回调模型无法表达上述锚定时钟语义。两个模块共用 `mc_easing`/`mc_real_t`。文档化的分工：
 
-- `mc_animate`: framework-driven animations — tween sequences, spring physics,
-  repeat/loop, completion callbacks.
-- `mc_transition`: immediate-mode UI element animation — declarative targets set
-  from input handlers, positions pulled during draw, trajectory a pure function
-  of wall-clock time.
+- `mc_animate`：框架驱动的动画——补间序列、弹簧物理、repeat/loop、完成回调。
+- `mc_transition`：立即式 UI 元素动画——输入 handler 里声明式设目标，绘制时拉取位置，轨迹是墙钟时间的纯函数。
 
-## Semantics Contract
+## 语义契约
 
-The module guarantees the following, mirroring the original toolkit:
+模块保证以下各条，与原版 toolkit 一致：
 
-1. **Absolute-time evaluation.** `current` is a pure function of `now_ms`:
+1. **绝对时间求值。** `current` 是 `now_ms` 的纯函数：
    ```
    delta = now_ms - time_offset
-   delta < delay            → current = start        (hold)
-   delta - delay > duration → current = end, is_finish = true   (stop evaluating)
-   otherwise                → t = (delta - delay) / duration            [0..1]
+   delta < delay            → current = start        （保持）
+   delta - delay > duration → current = end, is_finish = true   （停止计算）
+   否则                     → t = (delta - delay) / duration            [0..1]
                               current = start + (end - start) * path(t)
    ```
-   No state accumulates per frame. Frame rate affects sampling density only; a
-   dropped frame lands exactly on the correct position next update.
-2. **Deferred start (`is_changed`).** `move_to` sets `start = current`, `end =
-   target`, clears `is_finish`, and raises `is_changed` — without touching the
-   clock. The next `update(now_ms)` consumes `is_changed` and anchors
-   `time_offset = now_ms`. Input handlers may therefore retarget freely; motion
-   begins on the following drawn frame with the same `now` used to render it.
-3. **Persistent delay.** `delay` is configuration anchored per start, never
-   consumed. A 300 ms delay set once applies to every subsequent `move_to`.
-4. **`jump` vs `move`.** `jump(start, end)` teleports (`current = end`,
-   `is_finish = true`) and only records endpoints. `move_to` animates with the
-   configured duration/delay/path. `move_to` to the already-current target is a
-   no-op that does not disturb a running clock.
-5. **Pull model.** Readers (`x()`, `y()`, `end_x()`, `value()`, `is_finish()`)
-   work at any time without invoking update and without callbacks. An optional
-   `update_callback(self, user_data)` fires after each 2D update for derived
-   state.
-6. **Per-axis independence.** 2D/3D store one 1D transition per axis. `jump_to`
-   uses each axis's current value as its own start; `is_finish` is the AND of all
-   axes; 3D additionally supports per-axis delays (`set_each_delay`).
-7. **3D diverges from 2D deliberately.** The original toolkit's 3D transition
-   has no deferral flag: `move_to` unpauses immediately with the clock anchored
-   at `time_offset = 0` (so `update(50)` on a delay-free axis is already
-   mid-flight), and completion uses `>=` — `is_finish` becomes true exactly at
-   `delay + duration`. 2D keeps the `is_changed` deferral and finishes strictly
-   after `delay + duration` (`>`). Both behaviors are pinned by the original
-   toolkit's test timing and must be preserved as-is.
-8. **Reset.** `reset` returns to `start`, clears `time_offset`, sets
-   `is_paused = true`, `is_finish = false` — the "armed but not started" state
-   that `move_to` + `is_changed` later launches.
-9. **Color transition.** `mc_color_trans_t` runs three 1D transitions (R, G, B,
-   RGB888 domains) under one clock, exposing `jump_to(rgb888) / move_to(rgb888) /
-   value()`. It carries its own `is_changed` member — a deliberate unification
-   over the private port (which inferred "armed" from `is_paused && !is_finish`);
-   observable behavior is identical.
-10. **Defaults.** `init` sets `duration = 1000`, `path = mc_ease_quad_out`,
-   `is_paused = true`, `is_finish = true` — matching the private ports.
+   没有任何每帧累计的状态。帧率只影响采样密度；掉一帧后下一次 update 会精确落在正确位置上。
+2. **延迟启动（`is_changed`）。** `move_to` 设 `start = current`、`end = 目标`、清 `is_finish`，并置 `is_changed`——不动时钟。下一次 `update(now_ms)` 消费 `is_changed` 并锚定 `time_offset = now_ms`。因此输入 handler 可以随意改目标；运动从下一个被绘制的帧开始，且起表用的 `now` 与渲染该帧用的 `now` 相同。
+3. **持久 delay。** `delay` 是按次起表锚定的配置，从不被消费。设置一次的 300ms delay 对之后每次 `move_to` 都生效。
+4. **`jump` 与 `move` 之分。** `jump(start, end)` 瞬移（`current = end`、`is_finish = true`），只记录端点。`move_to` 按配置的 duration/delay/path 做动画。`move_to` 到当前已相同的目标是空操作，不打断运行中的时钟。
+5. **拉取模型。** 读取接口（`x()`、`y()`、`end_x()`、`value()`、`is_finish()`）任何时刻可用，无需调用 update，无需回调。可选的 `update_callback(self, user_data)` 在每次 2D update 之后触发，用于派生状态。
+6. **按轴独立。** 2D/3D 每轴存一个 1D transition。`jump_to` 以各轴当前值作为各自起点；`is_finish` 是所有轴的 AND；3D 额外支持按轴 delay（`set_each_delay`）。
+7. **3D 有意与 2D 不同。** 原版 toolkit 的 3D transition 没有延迟启动标志：`move_to` 立即解除暂停，时钟锚定在 `time_offset = 0`（所以无 delay 的轴在 `update(50)` 时已到中途），完成判定用 `>=`——`is_finish` 在 `delay + duration` 整点即变 true。2D 保留 `is_changed` 延迟启动，且在 `delay + duration` 严格之后才完成（`>`）。两者都被原版 toolkit 的测试时序钉住，必须原样保留。
+8. **Reset。** `reset` 回到 `start`、清 `time_offset`、置 `is_paused = true`、`is_finish = false`——"已上膛未起表"状态，之后由 `move_to` + `is_changed` 发射。
+9. **颜色过渡。** `mc_color_trans_t` 在一个时钟下跑三个 1D transition（R、G、B，RGB888 值域），对外暴露 `jump_to(rgb888) / move_to(rgb888) / value()`。它自带 `is_changed` 成员——这是对私有移植的一次刻意统一（原私有版从 `is_paused && !is_finish` 哨兵推断"已上膛"）；可观察行为完全一致。
+10. **默认值。** `init` 设 `duration = 1000`、`path = mc_ease_quad_out`、`is_paused = true`、`is_finish = true`——与私有移植一致。
 
-## API Design
+## API 设计
 
-Single module: `include/mc_transition.h` + `src/mc_transition.c` (~300 lines).
+单模块：`include/mc_transition.h` + `src/mc_transition.c`（约 300 行）。
 
-### Value domain
+### 值域
 
-Values are **`int32_t` pixel-domain integers**; easing runs in MotionC's native
-`mc_real_t` (Q16.16 by default) and is folded to integers internally with 64-bit
-intermediates:
+值是 **`int32_t` 像素域整数**；缓动跑在 MotionC 原生 `mc_real_t`（默认 Q16.16）上，内部用 64 位中间量折算回整数：
 
 ```c
 current = start + (int32_t)(((int64_t)(end - start) * path(t)) / MC_FP_SCALE);
 ```
 
-Endpoints are exact (`path(0) = 0`, `path(1) = MC_FP_SCALE`). Overshoot easings
-(back) may exceed `[start, end]`; `int32_t` has ample headroom. Rationale: UI
-coordinates are integers in every consumer; keeping values integer keeps view
-code free of conversion noise, while easing quality is unaffected (verified
-below).
+端点精确（`path(0) = 0`、`path(1) = MC_FP_SCALE`）。过冲缓动（back 系）可能超出 `[start, end]`；`int32_t` 余量充足。理由：所有消费者的 UI 坐标都是整数；值保持整数让视图代码免于转换噪音，缓动质量不受影响（下文已验证）。
 
-### Structures and functions
+### 结构与函数
 
 ```c
 typedef int32_t mc_transition_value_t;
@@ -160,7 +101,7 @@ void mc_transition_reset(mc_transition_t *t);
 void mc_transition_jump(mc_transition_t *t, int start, int end);
 void mc_transition_update(mc_transition_t *t, uint32_t now_ms);
 
-/* 2D — is_changed lives here (the deferral flag), plus optional per-frame hook */
+/* 2D — is_changed（延迟启动标志）在这里，外加可选的每帧钩子 */
 typedef struct mc_transition2d {
     mc_transition_t x, y;
     bool is_changed;
@@ -183,13 +124,13 @@ int  mc_transition2d_end_x(const mc_transition2d_t *tr);
 int  mc_transition2d_end_y(const mc_transition2d_t *tr);
 bool mc_transition2d_is_finish(const mc_transition2d_t *tr);
 
-/* 3D — shared duration/path; per-axis delay supported. No is_changed: the
-   clock anchors at time_offset = 0 and completes with >= (see contract #7). */
+/* 3D — 共享 duration/path；支持按轴 delay。
+   无 is_changed：时钟锚定 time_offset = 0，完成判定用 >=（见契约第 7 条）。 */
 typedef struct { mc_transition_t x, y, z; } mc_transition3d_t;
 /* init / set_duration / set_delay / set_each_delay(dx,dy,dz) / set_path /
    update / jump_to / move_to / x / y / z / is_finish                      */
 
-/* Smooth color (SmoothRGB equivalent), RGB888 in and out */
+/* 平滑颜色（SmoothRGB 等价物），RGB888 进出 */
 typedef struct { mc_transition_t r, g, b; bool is_changed; } mc_color_trans_t;
 void mc_color_trans_init(mc_color_trans_t *ct);
 void mc_color_trans_set_duration(mc_color_trans_t *ct, uint32_t ms);
@@ -199,65 +140,40 @@ uint32_t mc_color_trans_value(const mc_color_trans_t *ct);
 void mc_color_trans_update(mc_color_trans_t *ct, uint32_t now_ms);
 ```
 
-No public tick/HAL dependency: `update` takes `now_ms` explicitly. Consumers pass
-their platform clock (eui projects already thread `eui_get_tick_ms()` through
-their draw handlers).
+不依赖公开的 tick/HAL：`update` 显式传入 `now_ms`。消费者传自己的平台时钟（eui 项目的绘制 handler 本来就贯穿 `eui_get_tick_ms()`）。
 
-## Numeric Equivalence
+## 数值等价性
 
-The private ports used permille-integer easing (`int fn(int t)`, domain
-0..1000); MotionC easing is Q16.16 (`mc_real_t fn(mc_real_t t)`). Verified by a
-full-range differential check against the ported `easeOutBack`
-(`c1 = 1.70158`): **maximum deviation 4‰ of travel**, pure fixed-point rounding —
-under 1 px at 240 px. Endpoints match exactly. Interior-sample assertions in
-ported tests therefore use a ±5‰ (of travel) tolerance; endpoint and
-timing/`is_changed` assertions remain exact.
+私有移植用的是 permille 整数缓动（`int fn(int t)`，定义域 0..1000）；MotionC 缓动是 Q16.16（`mc_real_t fn(mc_real_t t)`）。已用全程差分对比验证过移植版 `easeOutBack`（`c1 = 1.70158`）：**最大偏差为行程的 4‰**，纯定点舍入——240px 屏上不足 1 像素。端点完全一致。因此移植测试中的中途采样断言改用 ±5‰（行程）容差；端点断言和时序/`is_changed` 断言保持精确。
 
-## Testing Plan
+## 测试计划
 
-- Port VAMeter's `test_transition2d.c` / `test_transition3d.c` as
-  `test/test_transition.c` (1D+2D+3D) and add color-transition cases, preserving
-  every timing assertion (deferred start, persistent delay, no-op retarget,
-  jump/move distinction, per-axis independence, reset state) including the 3D
-  divergence cases (zero-anchored clock, `>=` completion, per-axis delays).
-- Interior easing-value assertions switch from exact permille values to
-  ±5‰-of-travel tolerance; endpoint assertions stay exact.
-- Maintain the repository's 100% line-coverage standard for the new module.
-- CMake: nothing to wire — `file(GLOB_RECURSE src/*.c)` picks the module up;
-  tests register in `test/CMakeLists.txt` per existing pattern.
+- 将 VAMeter 的 `test_transition2d.c` / `test_transition3d.c` 移植为
+  `test/test_transition.c`（1D+2D+3D），并补充颜色过渡用例，保留全部时序断言（延迟启动、持久 delay、空操作 retarget、jump/move 之分、按轴独立、reset 状态），含 3D 差异用例（零锚时钟、`>=` 完成判定、按轴 delay）。
+- 中途缓动值断言从精确 permille 值改为 ±5‰（行程）容差；端点断言保持精确。
+- 新模块维持本仓库 100% 行覆盖率标准。
+- CMake：无需接线——`file(GLOB_RECURSE src/*.c)` 自动收编新模块；测试按现有模式登记到 `test/CMakeLists.txt`。
 
-## Integration & Migration Plan
+## 集成与迁移计划
 
-Consumers migrate in dependency order; each step is independently green.
+消费者按依赖顺序迁移；每一步独立保持绿灯。
 
-1. **MotionC**: land `mc_transition` + tests; push.
-2. **eui**: bump its `third_party/motionc` submodule to the new commit. Zero
-   build-system changes (CMake `add_subdirectory` and ESP-IDF `REQUIRES motionc`
-   already exist). eui keeps `eui_anim` (dt/push, built on `mc_animate`) for
-   framework-level view transitions; the two animation styles coexist with a
-   documented boundary (framework pushes, views pull).
-3. **Consumer projects (VAMeter `app-eui`, nfc-kit `fw/app-eui`)**: mechanical
-   rename migration, then delete the private ports:
+1. **MotionC**：落地 `mc_transition` + 测试；push。
+2. **eui**：把 `third_party/motionc` 子模块 bump 到新提交。构建系统零改动（CMake `add_subdirectory` 与 ESP-IDF `REQUIRES motionc` 均已存在）。eui 保留 `eui_anim`（dt/push，架在 `mc_animate` 上）服务框架级视图切换动画；两种动画风格并存，边界文档化（框架推、视图拉）。
+3. **消费者项目（VAMeter `app-eui`、nfc-kit `fw/app-eui`）**：机械改名迁移，然后删除私有移植：
 
-   | Private port | After |
+   | 私有移植 | 之后 |
    |---|---|
-   | `eui_transition2d.{c,h}`, `eui_transition3d.{c,h}`, `eui_color_trans*` | deleted; `#include "mc_transition.h"` |
-   | `eui_transition_t / 2d_t / 3d_t`, `eui_color_trans_t` | `mc_transition_t / 2d_t / 3d_t`, `mc_color_trans_t` |
-   | `eui_ease_linear / out_quad / out_back` (permille) | `mc_ease_linear / quad_out / back_out` (Q16.16) |
-   | `eui_rgb888_to_565` | stays project-side (display-format knowledge) |
-   | `update(now_ms)` call sites and `eui_get_tick_ms()` threading | unchanged |
+   | `eui_transition2d.{c,h}`、`eui_transition3d.{c,h}`、`eui_color_trans*` | 删除；`#include "mc_transition.h"` |
+   | `eui_transition_t / 2d_t / 3d_t`、`eui_color_trans_t` | `mc_transition_t / 2d_t / 3d_t`、`mc_color_trans_t` |
+   | `eui_ease_linear / out_quad / out_back`（permille） | `mc_ease_linear / quad_out / back_out`（Q16.16） |
+   | `eui_rgb888_to_565` | 留在项目侧（显示格式知识） |
+   | `update(now_ms)` 调用点与 `eui_get_tick_ms()` 贯穿 | 不变 |
 
-   The eui build already propagates MotionC include paths to consumers via its
-   existing target linkage.
+   eui 构建已通过现有 target 链接（`eui PUBLIC mc`）把 MotionC include 路径传递给消费者。
 
-## Risks
+## 风险
 
-- **Mid-animation pixel assertions** in consumer smoke tests may shift by <1 px
-  due to the 4‰ easing difference. Endpoints are exact; any failing interior
-  assertion is relaxed by ±1 px with a comment referencing this spec.
-- **`is_changed` unification for color** changes no observable behavior (the
-  private sentinel `is_paused && !is_finish` is equivalent); noted so reviewers
-  do not mistake it for a semantic change.
-- **Divergence risk** between this module and the original C++ toolkit is capped
-  by the ported regression tests; any future semantic change must update them
-  deliberately.
+- 消费者 smoke 测试中的**中途像素断言**可能因 4‰ 缓动差异位移 <1px。端点精确；任何超差的中途断言放宽 ±1px 并加注释引用本 spec。
+- **颜色过渡引入 `is_changed`** 不改变任何可观察行为（私有版哨兵 `is_paused && !is_finish` 等价）；在此注明，避免评审误判为语义变更。
+- 本模块与原版 C++ toolkit 的**偏离风险**由移植的回归测试封顶；未来任何语义变更都必须显式更新这些测试。
