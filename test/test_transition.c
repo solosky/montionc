@@ -253,6 +253,43 @@ static int test_2d_per_axis_jump(void) {
     PASS(); return 0;
 }
 
+static int test_3d_per_axis_delay_zero_anchor(void) {
+    TEST("3D per-axis delay, clock anchored at 0 (no deferral)");
+    mc_transition3d_t t;
+    mc_transition3d_init(&t);
+    mc_transition3d_set_duration(&t, 100);
+    mc_transition3d_set_path(&t, mc_ease_linear);
+    mc_transition3d_set_each_delay(&t, 0, 50, 100);
+    mc_transition3d_jump_to(&t, 0, 0, 0);
+    mc_transition3d_move_to(&t, 100, 100, 100);  /* unpauses NOW, offset stays 0 */
+    mc_transition3d_update(&t, 50);
+    CHECK(mc_transition3d_x(&t) == 50);          /* no delay: already halfway */
+    CHECK(mc_transition3d_y(&t) == 0);           /* delay 50: just starting */
+    CHECK(mc_transition3d_z(&t) == 0);           /* delay 100: not started */
+    mc_transition3d_update(&t, 200);
+    mc_transition3d_move_to(&t, 100, 100, 100);  /* same target: no-op, no restart */
+    CHECK(mc_transition3d_is_finish(&t) == true);
+    CHECK(mc_transition3d_x(&t) == 100);
+    PASS(); return 0;
+}
+
+static int test_3d_completion_at_exact_boundary(void) {
+    TEST("3D >= completion: finish exactly at delay+duration (delay 100, dur 100)");
+    mc_transition3d_t t;
+    mc_transition3d_init(&t);
+    mc_transition3d_set_duration(&t, 100);
+    mc_transition3d_set_path(&t, mc_ease_linear);
+    mc_transition3d_set_delay(&t, 100);
+    mc_transition3d_jump_to(&t, 0, 0, 0);
+    mc_transition3d_move_to(&t, 10, 10, 10);
+    mc_transition3d_update(&t, 199);
+    CHECK(mc_transition3d_is_finish(&t) == false);
+    mc_transition3d_update(&t, 200);             /* 100+100 exactly */
+    CHECK(mc_transition3d_is_finish(&t) == true);
+    CHECK(mc_transition3d_x(&t) == 10);
+    PASS(); return 0;
+}
+
 int main(void) {
     printf("test_transition:\n");
     if (test_1d_init_defaults()) return 1;
@@ -270,6 +307,8 @@ int main(void) {
     if (test_2d_noop_retarget()) return 1;
     if (test_2d_update_callback()) return 1;
     if (test_2d_per_axis_jump()) return 1;
+    if (test_3d_per_axis_delay_zero_anchor()) return 1;
+    if (test_3d_completion_at_exact_boundary()) return 1;
     printf("%d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }

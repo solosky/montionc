@@ -136,3 +136,91 @@ bool mc_transition2d_is_finish(const mc_transition2d_t *tr)
 {
     return tr->x.is_finish && tr->y.is_finish;
 }
+
+// ---------------------------------------------------------------------------
+// 3D transition — deliberately differs from 2D (spec contract #7):
+// no is_changed; move_to unpauses with time_offset = 0; completion uses >=.
+// ---------------------------------------------------------------------------
+
+static void tr3d_axis_update(mc_transition_t *a, uint32_t now_ms)
+{
+    if (a->is_paused || a->is_finish) return;
+    uint32_t delta_time = now_ms - a->time_offset;
+    if (delta_time < a->delay) {
+        a->current_value = a->start_value;
+        return;
+    }
+    uint32_t e = delta_time - a->delay;
+    if (a->duration == 0 || e >= a->duration) {   /* >= : exact boundary finishes */
+        a->current_value = a->end_value;
+        a->is_finish = true;
+        return;
+    }
+    tr_interpolate(a, e);
+}
+
+void mc_transition3d_init(mc_transition3d_t *t)
+{
+    mc_transition_init(&t->x);
+    mc_transition_init(&t->y);
+    mc_transition_init(&t->z);
+}
+
+void mc_transition3d_set_duration(mc_transition3d_t *t, uint32_t ms)
+{
+    t->x.duration = t->y.duration = t->z.duration = ms;
+}
+
+void mc_transition3d_set_delay(mc_transition3d_t *t, uint32_t ms)
+{
+    t->x.delay = t->y.delay = t->z.delay = ms;
+}
+
+void mc_transition3d_set_each_delay(mc_transition3d_t *t, uint32_t dx, uint32_t dy,
+                                    uint32_t dz)
+{
+    t->x.delay = dx;
+    t->y.delay = dy;
+    t->z.delay = dz;
+}
+
+void mc_transition3d_set_path(mc_transition3d_t *t, mc_easing_fn_t path)
+{
+    t->x.path = t->y.path = t->z.path = path;
+}
+
+void mc_transition3d_update(mc_transition3d_t *t, uint32_t now_ms)
+{
+    tr3d_axis_update(&t->x, now_ms);
+    tr3d_axis_update(&t->y, now_ms);
+    tr3d_axis_update(&t->z, now_ms);
+}
+
+void mc_transition3d_jump_to(mc_transition3d_t *t, int x, int y, int z)
+{
+    mc_transition_jump(&t->x, t->x.current_value, x);
+    mc_transition_jump(&t->y, t->y.current_value, y);
+    mc_transition_jump(&t->z, t->z.current_value, z);
+}
+
+void mc_transition3d_move_to(mc_transition3d_t *t, int x, int y, int z)
+{
+    if (x == t->x.end_value && y == t->y.end_value && z == t->z.end_value) return;
+    mc_transition_jump(&t->x, t->x.current_value, x);
+    mc_transition_jump(&t->y, t->y.current_value, y);
+    mc_transition_jump(&t->z, t->z.current_value, z);
+    mc_transition_reset(&t->x);   /* is_finish=false, time_offset=0, paused */
+    mc_transition_reset(&t->y);
+    mc_transition_reset(&t->z);
+    t->x.is_paused = false;       /* start immediately (contract #7) */
+    t->y.is_paused = false;
+    t->z.is_paused = false;
+}
+
+int  mc_transition3d_x(const mc_transition3d_t *t) { return t->x.current_value; }
+int  mc_transition3d_y(const mc_transition3d_t *t) { return t->y.current_value; }
+int  mc_transition3d_z(const mc_transition3d_t *t) { return t->z.current_value; }
+bool mc_transition3d_is_finish(const mc_transition3d_t *t)
+{
+    return t->x.is_finish && t->y.is_finish && t->z.is_finish;
+}
