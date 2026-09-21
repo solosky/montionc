@@ -22,6 +22,7 @@
 | `mc_easing.h` | `mc_easing_fn_t`, 30 个缓动函数, `mc_ease_cubic_bezier` | 缓动函数库（多项式 + LUT） |
 | `mc_spring.h` | `mc_spring_params_t`, `mc_spring_step` | 弹簧物理模拟（欧拉积分） |
 | `mc_animate.h` | `mc_animate_t`, `mc_vec2_animate_t`, `mc_vec4_animate_t` | 标量/二维/四维动画（缓动 + 弹簧双模式） |
+| `mc_transition.h` | `mc_transition_t`, `mc_transition2d_t/3d_t`, `mc_color_trans_t` | 平滑 UI Transition 语义（绝对时间 now_ms 驱动、拉取式、延迟启动） |
 | `mc_sequence.h` | `mc_sequence_t`, `mc_animate_step_t` | 动画序列，链式步骤 |
 | `mc_color.h` | `mc_rgb_t`, `mc_rgba_t`, hex/HSV 转换, 颜色混合 | RGB888 颜色工具 |
 | `mc_hal.h` | `mc_hal_set_tick_callback`, `mc_get_tick`, `mc_delay` | tick/delay 抽象层 |
@@ -31,6 +32,13 @@
 | `mc_allocator.h` | `mc_allocator_t`, `mc_allocator_set` | 外部分配器接口 |
 | `mc_errors.h` | `MC_OK`, `MC_ERR_NOMEM`, `MC_ERR_FULL` | 错误码 |
 | `mc_config.h` | `MC_USE_FLOAT` | 编译时配置开关 |
+
+## mc_transition vs mc_animate
+
+- `mc_animate`：dt 驱动、push 式（on_update 回调），服务补间序列、弹簧物理、repeat/loop。
+- `mc_transition`：绝对时间驱动（`update(now_ms)`）、拉取式（随时读 x()/y()），
+  服务立即式 UI 元素动画。位置是墙钟时间的纯函数，掉帧不影响轨迹。
+  语义契约见 `docs/superpowers/specs/2026-09-21-mc-transition-design.md`。
 
 ## 类型系统
 
