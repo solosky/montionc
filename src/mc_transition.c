@@ -59,3 +59,80 @@ void mc_transition_update(mc_transition_t *t, uint32_t now_ms)
 void mc_transition_set_duration(mc_transition_t *t, uint32_t ms) { t->duration = ms; }
 void mc_transition_set_delay(mc_transition_t *t, uint32_t ms) { t->delay = ms; }
 void mc_transition_set_path(mc_transition_t *t, mc_easing_fn_t path) { t->path = path; }
+
+// ---------------------------------------------------------------------------
+// 2D transition
+// ---------------------------------------------------------------------------
+
+void mc_transition2d_init(mc_transition2d_t *tr)
+{
+    mc_transition_init(&tr->x);
+    mc_transition_init(&tr->y);
+    tr->is_changed = false;
+    tr->update_callback = NULL;
+    tr->user_data = NULL;
+}
+
+void mc_transition2d_set_duration(mc_transition2d_t *tr, uint32_t ms)
+{
+    tr->x.duration = ms;
+    tr->y.duration = ms;
+}
+
+void mc_transition2d_set_delay(mc_transition2d_t *tr, uint32_t ms)
+{
+    tr->x.delay = ms;
+    tr->y.delay = ms;
+}
+
+void mc_transition2d_set_path(mc_transition2d_t *tr, mc_easing_fn_t path)
+{
+    tr->x.path = path;
+    tr->y.path = path;
+}
+
+void mc_transition2d_set_update_callback(mc_transition2d_t *tr,
+        void (*cb)(mc_transition2d_t *tr, void *user_data), void *user_data)
+{
+    tr->update_callback = cb;
+    tr->user_data = user_data;
+}
+
+void mc_transition2d_update(mc_transition2d_t *tr, uint32_t now_ms)
+{
+    if (tr->is_changed) {
+        tr->is_changed = false;
+        tr->x.time_offset = now_ms;
+        tr->y.time_offset = now_ms;
+        tr->x.is_paused = false;
+        tr->y.is_paused = false;
+    }
+    mc_transition_update(&tr->x, now_ms);
+    mc_transition_update(&tr->y, now_ms);
+    if (tr->update_callback) tr->update_callback(tr, tr->user_data);
+}
+
+void mc_transition2d_jump_to(mc_transition2d_t *tr, int x, int y)
+{
+    mc_transition_jump(&tr->x, tr->x.current_value, x);
+    mc_transition_jump(&tr->y, tr->y.current_value, y);
+}
+
+void mc_transition2d_move_to(mc_transition2d_t *tr, int x, int y)
+{
+    if (x == tr->x.end_value && y == tr->y.end_value) return;
+    mc_transition_jump(&tr->x, tr->x.current_value, x);
+    mc_transition_jump(&tr->y, tr->y.current_value, y);
+    mc_transition_reset(&tr->x);
+    mc_transition_reset(&tr->y);
+    tr->is_changed = true;
+}
+
+int  mc_transition2d_x(const mc_transition2d_t *tr) { return tr->x.current_value; }
+int  mc_transition2d_y(const mc_transition2d_t *tr) { return tr->y.current_value; }
+int  mc_transition2d_end_x(const mc_transition2d_t *tr) { return tr->x.end_value; }
+int  mc_transition2d_end_y(const mc_transition2d_t *tr) { return tr->y.end_value; }
+bool mc_transition2d_is_finish(const mc_transition2d_t *tr)
+{
+    return tr->x.is_finish && tr->y.is_finish;
+}

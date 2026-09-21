@@ -164,6 +164,95 @@ static int test_1d_pure_function_of_time(void) {
     PASS(); return 0;
 }
 
+static int g_cb_calls = 0;
+static void on_update_cb(mc_transition2d_t *tr, void *ud) { (void)tr; (void)ud; g_cb_calls++; }
+
+static int test_2d_jump_and_finish(void) {
+    TEST("2D jump = no transition, is_finish = AND of axes");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_jump_to(&tr, 10, 20);
+    CHECK(mc_transition2d_x(&tr) == 10 && mc_transition2d_y(&tr) == 20);
+    CHECK(mc_transition2d_is_finish(&tr) == true);
+    PASS(); return 0;
+}
+
+static int test_2d_deferred_start_timeline(void) {
+    TEST("2D move+update dur=100: anchored at first update, strict > completion");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_set_duration(&tr, 100);
+    mc_transition2d_set_path(&tr, mc_ease_quad_out);
+    mc_transition2d_move_to(&tr, 110, 20);       /* only endpoints + is_changed */
+    CHECK(mc_transition2d_x(&tr) == 0);          /* clock not started yet */
+    CHECK(mc_transition2d_is_finish(&tr) == false);
+    mc_transition2d_update(&tr, 1000);           /* anchors here */
+    CHECK(mc_transition2d_x(&tr) == 0);          /* t=0, quad_out(0)=0 */
+    mc_transition2d_update(&tr, 1101);           /* 101 > 100 → done */
+    CHECK(mc_transition2d_x(&tr) == 110 && mc_transition2d_y(&tr) == 20);
+    CHECK(mc_transition2d_is_finish(&tr) == true);
+    PASS(); return 0;
+}
+
+static int test_2d_delay_holds_start(void) {
+    TEST("2D delay holds start value; config persists across moves");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_set_duration(&tr, 100);
+    mc_transition2d_set_delay(&tr, 200);
+    mc_transition2d_jump_to(&tr, 0, 0);
+    mc_transition2d_move_to(&tr, 110, 20);
+    mc_transition2d_update(&tr, 1000);           /* anchor */
+    mc_transition2d_update(&tr, 1101);           /* inside 200ms delay */
+    CHECK(mc_transition2d_x(&tr) == 0);
+    mc_transition2d_update(&tr, 1301);           /* past delay+duration */
+    CHECK(mc_transition2d_x(&tr) == 110);
+    /* second move reuses delay config */
+    mc_transition2d_move_to(&tr, 210, 20);
+    mc_transition2d_update(&tr, 1301);           /* re-anchored: inside delay again */
+    CHECK(mc_transition2d_x(&tr) == 110);
+    PASS(); return 0;
+}
+
+static int test_2d_noop_retarget(void) {
+    TEST("2D move to current target is a no-op (no clock restart)");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_set_duration(&tr, 100);
+    mc_transition2d_move_to(&tr, 210, 20);
+    mc_transition2d_update(&tr, 1000);           /* anchor */
+    mc_transition2d_move_to(&tr, 210, 20);       /* same target: must not re-anchor */
+    mc_transition2d_update(&tr, 1101);
+    CHECK(mc_transition2d_x(&tr) == 210);        /* finished on the original clock */
+    PASS(); return 0;
+}
+
+static int test_2d_update_callback(void) {
+    TEST("2D update_callback fires once per update");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_set_duration(&tr, 100);
+    mc_transition2d_set_update_callback(&tr, on_update_cb, NULL);
+    mc_transition2d_move_to(&tr, 10, 0);
+    mc_transition2d_update(&tr, 100);
+    mc_transition2d_update(&tr, 200);
+    CHECK(g_cb_calls == 2);
+    PASS(); return 0;
+}
+
+static int test_2d_per_axis_jump(void) {
+    TEST("2D jump_to uses each axis current as its own start");
+    mc_transition2d_t tr;
+    mc_transition2d_init(&tr);
+    mc_transition2d_jump_to(&tr, 5, 7);          /* current 0,0 → start 0,0 */
+    CHECK(mc_transition2d_x(&tr) == 5 && mc_transition2d_y(&tr) == 7);
+    CHECK(mc_transition2d_end_x(&tr) == 5 && mc_transition2d_end_y(&tr) == 7);
+    mc_transition2d_jump_to(&tr, 9, 11);         /* current 5,7 → start 5,7 */
+    CHECK(tr.x.start_value == 5 && tr.y.start_value == 7);
+    CHECK(mc_transition2d_x(&tr) == 9 && mc_transition2d_y(&tr) == 11);
+    PASS(); return 0;
+}
+
 int main(void) {
     printf("test_transition:\n");
     if (test_1d_init_defaults()) return 1;
@@ -175,6 +264,12 @@ int main(void) {
     if (test_1d_zero_duration()) return 1;
     if (test_1d_long_duration_no_overflow()) return 1;
     if (test_1d_pure_function_of_time()) return 1;
+    if (test_2d_jump_and_finish()) return 1;
+    if (test_2d_deferred_start_timeline()) return 1;
+    if (test_2d_delay_holds_start()) return 1;
+    if (test_2d_noop_retarget()) return 1;
+    if (test_2d_update_callback()) return 1;
+    if (test_2d_per_axis_jump()) return 1;
     printf("%d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
