@@ -299,20 +299,23 @@ static int test_color_jump_move_value(void) {
     CHECK(mc_color_trans_value(&ct) == 0xCBDEEE);
     mc_color_trans_move_to(&ct, 0x536484);       /* deferred start */
     mc_color_trans_update(&ct, 100);             /* anchor */
+    CHECK(mc_color_trans_value(&ct) == 0xCBDEEE); /* deferred: still held at start */
     mc_color_trans_update(&ct, 100 + 175);       /* midpoint: per-channel check */
     CHECK(mc_color_trans_value(&ct) != 0x536484);
-    mc_color_trans_update(&ct, 100 + 351);       /* strict > (2D rules) */
+    mc_color_trans_update(&ct, 100 + 351);       /* past the end: clamped at target */
     CHECK(mc_color_trans_value(&ct) == 0x536484);
     PASS(); return 0;
 }
 
 static int test_color_same_value_noop(void) {
-    TEST("color move_to same value is a no-op");
+    TEST("color move_to same value is a no-op (does not re-arm)");
     mc_color_trans_t ct;
     mc_color_trans_init(&ct);
     mc_color_trans_set_duration(&ct, 100);
     mc_color_trans_jump_to(&ct, 0x112233);
-    mc_color_trans_move_to(&ct, 0x112233);       /* value() == target: no re-anchor */
+    mc_color_trans_move_to(&ct, 0x112233);       /* already at target: guard returns */
+    CHECK(ct.is_changed == false);               /* nothing was armed */
+    CHECK(ct.r.is_finish == true);               /* and nothing was reset */
     mc_color_trans_update(&ct, 1000);
     mc_color_trans_update(&ct, 2000);
     CHECK(mc_color_trans_value(&ct) == 0x112233);
