@@ -5,7 +5,8 @@
  * Fold Q16.16 easing output to integer pixels with 64-bit intermediates. */
 static void tr_interpolate(mc_transition_t *t, uint32_t e)
 {
-    mc_real_t tt = MC_REAL_FROM_INT(e) / t->duration;   /* [0,1] */
+    /* 64-bit intermediate: e * MC_FP_SCALE overflows int32 for e >= 32768 */
+    mc_real_t tt = (mc_real_t)(((int64_t)e * MC_FP_SCALE) / t->duration);
     mc_real_t eased = t->path(tt);
     int64_t span = (int64_t)t->end_value - (int64_t)t->start_value;
     t->current_value = t->start_value + (int32_t)((span * eased) / MC_FP_SCALE);

@@ -134,6 +134,36 @@ static int test_1d_zero_duration(void) {
     PASS(); return 0;
 }
 
+static int test_1d_long_duration_no_overflow(void) {
+    TEST("1D long duration (e > 65536) scales time without overflow");
+    mc_transition_t t;
+    mc_transition_init(&t);
+    mc_transition_set_duration(&t, 100000);
+    mc_transition_set_path(&t, mc_ease_linear);
+    mc_transition_jump(&t, 0, 100000);
+    arm(&t, 0);
+    mc_transition_update(&t, 70000);
+    CHECK_NEAR(t.current_value, 70000, 2);   /* ≈69999; ~4463 with the overflow */
+    PASS(); return 0;
+}
+
+static int test_1d_pure_function_of_time(void) {
+    TEST("1D update is a pure function of now_ms (no per-frame accumulation)");
+    mc_transition_t t;
+    mc_transition_init(&t);
+    mc_transition_set_duration(&t, 100);
+    mc_transition_set_path(&t, mc_ease_linear);
+    mc_transition_jump(&t, 0, 100);
+    arm(&t, 1000);
+    mc_transition_update(&t, 1050);
+    int32_t once = t.current_value;
+    mc_transition_update(&t, 1050);   /* same timestamp: same value */
+    CHECK(t.current_value == once);
+    mc_transition_update(&t, 1040);   /* earlier timestamp: recomputes, never accumulates */
+    CHECK(t.current_value < once);
+    PASS(); return 0;
+}
+
 int main(void) {
     printf("test_transition:\n");
     if (test_1d_init_defaults()) return 1;
@@ -143,6 +173,8 @@ int main(void) {
     if (test_1d_delay_persistent()) return 1;
     if (test_1d_reset()) return 1;
     if (test_1d_zero_duration()) return 1;
+    if (test_1d_long_duration_no_overflow()) return 1;
+    if (test_1d_pure_function_of_time()) return 1;
     printf("%d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
 }
