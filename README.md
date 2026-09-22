@@ -24,6 +24,7 @@
 | `mc_animate.h` | `mc_animate_t`, `mc_vec2_animate_t`, `mc_vec4_animate_t` | 标量/二维/四维动画（缓动 + 弹簧双模式） |
 | `mc_transition.h` | `mc_transition_t`, `mc_transition2d_t/3d_t`, `mc_color_trans_t` | 平滑 UI Transition 语义（绝对时间 now_ms 驱动、拉取式、延迟启动） |
 | `mc_sequence.h` | `mc_sequence_t`, `mc_animate_step_t` | 动画序列，链式步骤 |
+| `mc_wave.h` | `mc_wave_t`, `mc_wave_ring_t`, `mc_wave_config_t` | 双通道行波水波样本发生器（双正弦环形缓冲，B 通道 2 倍速；smooth_ui_toolkit WaterWaveGenerator 语义，零 math.h：1/4 周期 LUT 正弦） |
 | `mc_color.h` | `mc_rgb_t`, `mc_rgba_t`, hex/HSV 转换, 颜色混合 | RGB888 颜色工具 |
 | `mc_hal.h` | `mc_hal_set_tick_callback`, `mc_get_tick`, `mc_delay` | tick/delay 抽象层 |
 | `mc_ringbuf.h` | `mc_ringbuf_t` | 环形缓冲区 |
