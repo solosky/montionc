@@ -205,6 +205,35 @@ mc_spring_params_t params = {
 mc_spring_step(&x, &state, &params, MC_FP_C(10), MC_FP_C(1.0f / 60));
 ```
 
+## 水波发生器（mc_wave）
+
+双通道行波样本发生器（smooth_ui_toolkit WaterWaveGenerator 语义）：A/B 两条正弦波填入环形样本缓冲，每次 update A 推进一列、B 推进两列（B 滚动速度两倍）。零 math.h 依赖（1/4 周期 LUT 正弦）；样本存储由调用方提供。
+
+```c
+#include "mc_wave.h"
+
+static int16_t wave_a[240], wave_b[240];   /* 调用方存储，容量 = length */
+
+mc_wave_t wave;
+mc_wave_config_t cfg;
+mc_wave_config_default(&cfg);              /* a 10/0, b 13/-10, period 60, shift 20 */
+// cfg.a_scale = MC_FP_C(8);               /* 可按需覆盖 */
+
+mc_wave_init(&wave, wave_a, wave_b, 240, &cfg);
+
+// 渲染前推进（如每 10ms 一次）
+mc_wave_update(&wave);
+
+// 逐列取样本画竖线：count 为有效样本数（环满时 = length-1，
+// SUT RingBuffer off-by-one 语义），at(i) 从最老样本数起
+for (uint32_t i = 0; i < mc_wave_count(&wave.a); i++) {
+    int16_t ya = mc_wave_at(&wave.a, i);
+    draw_vline(i, ya + y_offset);
+}
+```
+
+通道公式：`A(x) = sin(x/period)*a_scale + a_offset`，`B(x) = sin((x-b_shift)/period)*b_scale + b_offset`；`mc_wave_sample_a/b()` 可对任意 x 求值（测试/外推用）。
+
 ## 颜色工具
 
 ```c
